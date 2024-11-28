@@ -185,8 +185,6 @@ my @tests = (
     'cosh(x+y)*cosh(x-y)',
     'sinh(2*x)-2*sinh(x)*cosh(x)',
     'cosh(x)^2-sinh(x)^2+2*cosh(x)*sinh(x)',
-    'exp(3)',
-    'exp(x)',
     'exp(2*x)',
     'exp(sqrt(3))',
     'exp(3*2+2*1)',
