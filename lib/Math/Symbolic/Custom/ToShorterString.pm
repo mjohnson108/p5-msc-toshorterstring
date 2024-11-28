@@ -15,11 +15,11 @@ Math::Symbolic::Custom::ToShorterString - Shorter string representations of Math
 
 =head1 VERSION
 
-Version 0.03
+Version 0.1
 
 =cut
 
-our $VERSION = '0.03';
+our $VERSION = '0.1';
 
 use Math::Symbolic qw(:all);
 use Math::Symbolic::Custom::Base;
