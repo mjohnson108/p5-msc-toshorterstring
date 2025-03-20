@@ -18,6 +18,7 @@ my %WriteMakefileArgs = (
     },
     PREREQ_PM => {
         'Math::Symbolic'    =>  '0.613',
+        'Math::SymbolicX::ParserExtensionFactory'   =>  '3.02',
     },
     dist  => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
     clean => { FILES => 'Math-Symbolic-Custom-ToShorterString-*' },
