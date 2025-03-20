@@ -15,11 +15,11 @@ Math::Symbolic::Custom::ToShorterString - Shorter string representations of Math
 
 =head1 VERSION
 
-Version 0.1
+Version 0.2
 
 =cut
 
-our $VERSION = '0.1';
+our $VERSION = '0.2';
 
 use Math::Symbolic qw(:all);
 use Math::Symbolic::Custom::Base;
@@ -28,28 +28,51 @@ BEGIN {*import = \&Math::Symbolic::Custom::Base::aggregate_import}
    
 our $Aggregate_Export = [qw/to_shorter_infix_string/];
 
+# define ln in the parser as the natural logarithm 
+use Math::SymbolicX::ParserExtensionFactory (
+    ln => sub {
+        my $arg = shift;
+        return Math::Symbolic::Operator->new('log', Math::Symbolic::Constant->euler(), $arg);
+    },
+);
+
 use Carp;
 
 =pod
 
 =head1 SYNOPSIS
 
-	use Math::Symbolic qw(:all);
-	use Math::Symbolic::Custom::ToShorterString;
+    use Math::Symbolic 0.613 qw(:all);
+    use Math::Symbolic::Custom::ToShorterString 0.2;
 
-	my $f = parse_from_string("1*2+3*4+5*sqrt(x+y+z)");
+    # Note: ToShorterString v0.2 automatically adds ln(x) as an alias for log(e,x) in the parser
+    my $f = parse_from_string("1*2+3*4+5*sqrt(x+y+z)+ln(y)");
 
-	print "to_string():\t", $f->to_string(), "\n";
-	# to_string():	((1 * 2) + (3 * 4)) + (5 * (((x + y) + z) ^ 0.5))
+    # Try displaying with Math::Symbolic's to_string()
+    my $to_string = $f->to_string();
+    print "to_string():\t$to_string\n";
+    # to_string():	(((1 * 2) + (3 * 4)) + (5 * (((x + y) + z) ^ 0.5))) + (log(2.71828182845905, y))
 
-	print "to_shorter_infix_string():\t", $f->to_shorter_infix_string(), "\n";
-	# to_shorter_infix_string():	(1*2 + 3*4) + (5*sqrt(x + y + z))
+    # Try displaying with ToShorterString
+    my $to_shorter_infix_string = $f->to_shorter_infix_string();
+    print "to_shorter_infix_string():\t$to_shorter_infix_string\n";
+    # to_shorter_infix_string():	((1*2 + 3*4) + (5*sqrt(x + y + z))) + ln(y)
+
+    # Check that the two output string representations parse to the same expression
+    my $f2 = parse_from_string($to_string);
+    my $f3 = parse_from_string($to_shorter_infix_string);
+
+    if ( $f2->to_string() eq $f3->to_string() ) {
+        print "Parsed to same string\n";
+    }
 
 =head1 DESCRIPTION
 
-Provides "to_shorter_infix_string()" through the Math::Symbolic module extension class. "to_shorter_infix_string()" attempts to provide a string representation of a Math::Symbolic tree that is shorter and therefore more readable than the existing (infix) "to_string()" method. 
+Provides C<to_shorter_infix_string()> through the Math::Symbolic module extension class. "to_shorter_infix_string()" attempts to provide a string representation of a Math::Symbolic tree that is shorter and therefore more readable than the existing (infix) C<to_string()> method. 
 
-The "to_string()" method wraps every branch in parentheses/brackets, which makes larger expressions difficult to read. "to_shorter_infix_string()" tries to determine whether parentheses are required and omits them. One of the goals of this module is that the output string should parse to a Math::Symbolic tree that is (at least numerically) equivalent to the original expression - even if the resulting Math::Symbolic tree might not be completely identical to the original (for that, use "to_string()"). Where appropriate, it produces strings containing the Math::Symbolic parser aliases "sqrt()" and "exp()".
+The "to_string()" method wraps every branch in parentheses/brackets, which makes larger expressions difficult to read. "to_shorter_infix_string()" tries to determine whether parentheses are required and omits them. One of the goals of this module is that the output string should parse to a Math::Symbolic tree that is (at least numerically) equivalent to the original expression - even if the resulting Math::Symbolic tree might not be completely identical to the original (for that, use "to_string()"). Where appropriate, it produces strings containing the Math::Symbolic parser aliases C<sqrt()> and C<exp()>.
+
+From v0.2, the module uses L<Math::SymbolicX::ParserExtensionFactory> to automatically add C<ln(x)> as an alias for C<log(e,x)> in the parser, and uses it for string output as well (in the same way as C<sqrt()> and C<exp()>). 
 
 The "to_shorter_infix_string()" does not replace the "to_string()" method, it has to be called explicitly.
 
@@ -67,11 +90,11 @@ sub to_shorter_infix_string {
     if ( $brackets_on ) {
         
         # check if we can turn brackets off for the tree below
-        if ( is_all_operator($t, B_PRODUCT) || is_all_operator($t, B_SUM) ) {
+        if ( _is_all_operator($t, B_PRODUCT) || _is_all_operator($t, B_SUM) ) {
             $brackets_on = 0;
         }
         # "expanded" for a simple expression essentially defined as no +/- below a * in the tree
-        if ( is_all_operator($t, [B_SUM, B_DIFFERENCE, B_PRODUCT]) && is_expanded($t) ) {
+        if ( _is_all_operator($t, [B_SUM, B_DIFFERENCE, B_PRODUCT]) && _is_expanded($t) ) {
             $brackets_on = 0;
         }
     }
@@ -82,19 +105,35 @@ sub to_shorter_infix_string {
     my $op_str = $op_info->{infix_string};
 
     if ( $t->arity() == 2 ) {
+
         # handle special cases
         # prefix operator
         if ( not defined $op_str ) {
-            $string .= $op_info->{prefix_string} . "(";
-            $string .= join( ', ',
-                map { to_shorter_infix_string($_, $brackets_on) } @{ $t->{operands} } );
-            $string .= ')';
+
+            # write ln(x) instead of log(e, x)
+            if ( ($op_info->{prefix_string} eq 'log') && ($t->op1()->term_type() == T_CONSTANT) && ($t->op1()->{special} eq 'euler') ) {
+
+                $string .= "ln(" . to_shorter_infix_string($t->op2(), $brackets_on) . ")";
+            }
+            else { 
+
+                $string .= $op_info->{prefix_string} . "(";
+                $string .= join( ', ',
+                    map { to_shorter_infix_string($_, $brackets_on) } @{ $t->{operands} } );
+                $string .= ')';
+            }
         }       
         # 'sqrt' and 'exp' are in the parser, use them
         elsif ( $t->type() == B_EXP ) {
 
             if ( ($t->op2()->term_type() == T_CONSTANT) && ($t->op2()->value() == 0.5) ) {
 
+                $string .= "sqrt(" . to_shorter_infix_string($t->op1(), $brackets_on) . ")";
+            }
+            elsif ( ($t->op2()->term_type() == T_OPERATOR) && ($t->op2()->type() == B_DIVISION) &&
+                    ($t->op2()->op1()->term_type == T_CONSTANT) && ($t->op2()->op1()->value() == 1) &&
+                    ($t->op2()->op2()->term_type == T_CONSTANT) && ($t->op2()->op2()->value() == 2) ) {
+                    
                 $string .= "sqrt(" . to_shorter_infix_string($t->op1(), $brackets_on) . ")";
             }
             elsif ( ($t->op1()->term_type() == T_CONSTANT) && ($t->op1()->{special} eq 'euler') ) {
@@ -164,10 +203,10 @@ sub to_shorter_infix_string {
     return $string;
 }
 
-# is_all_operator
+# _is_all_operator
 # returns 1 if the passed in tree $t is comprised entirely of the
 # operator(s) specified in $op_type (excluding prefix-only operators)
-sub is_all_operator {
+sub _is_all_operator {
     my ($t, $op_type) = @_;
     
     return 1 if ($t->term_type() == T_CONSTANT) || ($t->term_type() == T_VARIABLE);
@@ -187,15 +226,15 @@ sub is_all_operator {
     }
     
     my $ok = 1;
-    $ok &= is_all_operator($_, $op_type) for @{$t->{operands}};
+    $ok &= _is_all_operator($_, $op_type) for @{$t->{operands}};
     return $ok;
 }
 
-# is_expanded
+# _is_expanded
 # returns 1 if there are no +/- below a * in the tree.
 # FIXME: Cannot really be run by itself - has to be restricted to the operators involved, i.e.:
-# is_all_operator($t, [B_SUM, B_DIFFERENCE, B_PRODUCT]) && is_expanded($t)
-sub is_expanded {
+# _is_all_operator($t, [B_SUM, B_DIFFERENCE, B_PRODUCT]) && _is_expanded($t)
+sub _is_expanded {
     my ($t, $flag) = @_;
     
     $flag = 0 unless defined $flag;
@@ -216,7 +255,7 @@ sub is_expanded {
     }
 
     my $ok = 1;
-    $ok &= is_expanded($_, $flag) for @{$t->{operands}};
+    $ok &= _is_expanded($_, $flag) for @{$t->{operands}};
     return $ok;
 }
 
@@ -230,12 +269,6 @@ L<Math::Symbolic>
 
 Matt Johnson, C<< <mjohnson at cpan.org> >>
 
-=head1 BUGS
-
-Please report any bugs or feature requests to C<bug-math-symbolic-custom-toshorterstring at rt.cpan.org>, or through
-the web interface at L<https://rt.cpan.org/NoAuth/ReportBug.html?Queue=Math-Symbolic-Custom-ToShorterString>.  I will be notified, and then you'll
-automatically be notified of progress on your bug as I make changes.
-
 =head1 ACKNOWLEDGEMENTS
 
 Steffen Mueller, author of Math::Symbolic
@@ -246,7 +279,6 @@ This software is copyright (c) 2024 by Matt Johnson.
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
-
 
 =cut
 
